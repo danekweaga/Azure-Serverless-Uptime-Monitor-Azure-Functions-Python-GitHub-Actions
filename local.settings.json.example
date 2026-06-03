@@ -3,6 +3,6 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "MONITORED_URLS": "[{\"name\": \"Example\", \"url\": \"https://example.com\"}, {\"name\": \"GitHub Status\", \"url\": \"https://www.githubstatus.com\"}]"
+    "MONITORED_URLS": "[{\"name\": \"Kairos\", \"url\": \"https://kairos-six-inky.vercel.app/\"}, {\"name\": \"MoneyCheck\", \"url\": \"https://money-check-theta.vercel.app/dashboard\"}, {\"name\": \"CourtLedger\", \"url\": \"https://court-ledger.vercel.app/\"}]"
   }
 }
