@@ -1,0 +1,5 @@
+# Azure Functions Python library (v2 programming model)
+azure-functions
+
+# HTTP client for checking monitored URLs
+requests

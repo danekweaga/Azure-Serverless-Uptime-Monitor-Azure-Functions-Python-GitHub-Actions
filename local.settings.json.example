@@ -1,0 +1,8 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "MONITORED_URLS": "[{\"name\": \"Example\", \"url\": \"https://example.com\"}, {\"name\": \"GitHub Status\", \"url\": \"https://www.githubstatus.com\"}]"
+  }
+}
