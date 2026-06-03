@@ -23,8 +23,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      # Flex Consumption: install deps into the folder Azure expects in the zip
+      - name: Install dependencies for deployment package
+        run: pip install --target=".python_packages/lib/site-packages" -r requirements.txt
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
@@ -32,5 +33,6 @@ jobs:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           package: .
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+          # Required for Flex Consumption (regional URLs like *.canadacentral-01.azurewebsites.net)
+          sku: flexconsumption
+          remote-build: true
