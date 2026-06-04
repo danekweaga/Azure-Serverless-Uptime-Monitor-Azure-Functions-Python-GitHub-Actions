@@ -3,3 +3,6 @@ azure-functions
 
 # HTTP client for checking monitored URLs
 requests
+
+# Azure Table Storage for persistent check history
+azure-data-tables

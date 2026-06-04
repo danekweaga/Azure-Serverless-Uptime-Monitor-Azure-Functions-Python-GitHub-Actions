@@ -1,286 +1,251 @@
-# Azure Serverless Uptime Monitor (MVP)
+# Azure Serverless Uptime Monitor
 
-A beginner-friendly **serverless uptime monitor** built with **Python Azure Functions**. It checks a list of URLs every hour and exposes a simple HTTP API with the latest results.
+A beginner-friendly **serverless uptime monitor** built with **Python Azure Functions**. It checks URLs every hour, stores history in **Azure Table Storage**, exposes JSON/HTML APIs, and can send optional **Discord alerts**.
 
-Perfect for explaining in an interview: timer trigger, HTTP API, environment-based config, and CI/CD with GitHub Actions.
+Good for interviews: timer trigger, HTTP APIs, durable storage, env-based config, logging, and GitHub Actions CI/CD.
 
-## How it works
+## Architecture
 
 ```text
-MONITORED_URLS (env var, JSON)
-        |
-        v
+MONITORED_URLS
+      |
+      v
 +---------------------------+
-|  scheduled_health_check   |  Timer: every hour
-|  (updates in-memory cache)|
+| scheduled_health_check    |  every hour
+| + on-demand HTTP checks   |
 +---------------------------+
-        |
-        v
-   LATEST_RESULTS (in memory)
-        |
-        v
-+---------------------------+
-|  GET /api/health-report   |  HTTP: returns JSON
-+---------------------------+
+      |
+      +--> LATEST_RESULTS (in-memory latest snapshot)
+      |
+      +--> Azure Table Storage (UptimeChecks history)
+      |
+      +--> Discord webhook (optional, unhealthy only)
+      |
+      v
++-----------+  +-----------+  +-------------+  +--------------+
+| health-   |  | dashboard |  | history     |  | history-view |
+| report    |  | (HTML)    |  | (JSON)      |  | (HTML table) |
++-----------+  +-----------+  +-------------+  +--------------+
 ```
 
-- **Timer function** (`scheduled_health_check`): runs every hour, checks each URL, stores results in memory.
-- **HTTP function** (`health-report`): returns cached results. If the cache is empty (e.g. right after a cold start), it runs checks on demand.
+## Tech stack
 
-> **MVP limitation:** Results live in memory and are lost when the app restarts. Later you can add Azure Table Storage for persistence.
+- Python 3.11+ / Azure Functions v2 programming model
+- Timer trigger + HTTP triggers
+- `requests` for URL checks
+- `azure-data-tables` for persistent history
+- Azure Table Storage via `AzureWebJobsStorage`
+- GitHub Actions deploy (Flex Consumption)
 
 ## Project structure
 
 ```text
 .
-├── function_app.py              # Both functions + health check logic
-├── host.json                    # Azure Functions host configuration
-├── requirements.txt             # Python dependencies
-├── local.settings.json.example  # Copy to local.settings.json for local dev
-├── .github/workflows/deploy.yml # GitHub Actions deployment
+├── function_app.py
+├── host.json
+├── requirements.txt
+├── local.settings.json.example
+├── .github/workflows/deploy.yml
 └── README.md
 ```
-
-## Prerequisites
-
-- [Python 3.11](https://www.python.org/downloads/)
-- [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
-- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (for creating Azure resources)
-- An Azure subscription (free tier is fine for learning)
-
-## Local setup
-
-### 1. Clone and create a virtual environment
-
-```bash
-git clone <your-repo-url>
-cd Azure-Serverless-Uptime-Monitor-Azure-Functions-Python-GitHub-Actions
-
-python -m venv .venv
-
-# Windows (PowerShell)
-.\.venv\Scripts\Activate.ps1
-
-# macOS / Linux
-source .venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure local settings
-
-Copy the example file (this file is **not** committed to git):
-
-```bash
-# Windows
-copy local.settings.json.example local.settings.json
-
-# macOS / Linux
-cp local.settings.json.example local.settings.json
-```
-
-Edit `local.settings.json` and set `MONITORED_URLS` to the sites you want to monitor.
-
-### 4. Run locally
-
-```bash
-func start
-```
-
-You should see output like:
-
-```text
-Functions:
-  health_report: [GET] http://localhost:7071/api/health-report
-  scheduled_health_check: timerTrigger
-```
-
-### 5. Test the health report
-
-Open in a browser or use curl:
-
-```bash
-curl http://localhost:7071/api/health-report
-```
-
-Example response:
-
-```json
-{
-  "results": [
-    {
-      "app": "Example",
-      "url": "https://example.com",
-      "status_code": 200,
-      "response_time_ms": 245.12,
-      "healthy": true,
-      "checked_at": "2026-06-03T17:00:00.123456+00:00",
-      "error": null
-    }
-  ],
-  "count": 1
-}
-```
-
-The timer runs every hour locally as well. For faster testing during development, you can temporarily change the schedule in `function_app.py` (see comments in that file).
 
 ## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `FUNCTIONS_WORKER_RUNTIME` | Yes | Must be `python` |
-| `AzureWebJobsStorage` | Yes | Storage connection for the Functions runtime |
-| `MONITORED_URLS` | Yes | JSON array of sites to monitor |
+| `AzureWebJobsStorage` | Yes | Storage connection for Functions runtime and Table Storage |
+| `MONITORED_URLS` | Yes | JSON array of `{ "name", "url" }` objects |
+| `UPTIME_TABLE_NAME` | No | Table name for history (default: `UptimeChecks`) |
+| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for unhealthy alerts (leave empty to disable) |
 
-### `MONITORED_URLS` format
+### `MONITORED_URLS` example
 
 ```json
 [
-  {"name": "My API", "url": "https://api.example.com/health"},
-  {"name": "Marketing Site", "url": "https://www.example.com"}
+  {"name": "Kairos", "url": "https://kairos-six-inky.vercel.app/"},
+  {"name": "MoneyCheck", "url": "https://money-check-theta.vercel.app/dashboard"},
+  {"name": "CourtLedger", "url": "https://court-ledger.vercel.app/"}
 ]
 ```
 
-- **name**: Friendly app name shown in the report (`app` field in results).
-- **url**: Full URL to request (GET).
+## API endpoints
 
-## Deploy to Azure (manual)
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health-report` | Latest check results as JSON |
+| `GET /api/dashboard` | HTML dashboard with latest status + history stats |
+| `GET /api/history` | Stored history as JSON (default limit 50) |
+| `GET /api/history?app=Kairos` | Filter history by app name |
+| `GET /api/history?limit=10` | Limit number of records |
+| `GET /api/history-view` | Stored history as an HTML table |
 
-### 1. Create resources
+## Local setup
 
-```bash
-# Login
-az login
+### 1. Clone and create a virtual environment
 
-# Variables (change these)
-RESOURCE_GROUP="rg-uptime-monitor"
-LOCATION="eastus"
-STORAGE_ACCOUNT="stuptimemonitor001"   # must be globally unique, lowercase
-FUNCTION_APP="func-uptime-monitor-001"  # must be globally unique
+```powershell
+git clone <your-repo-url>
+cd Azure-Serverless-Uptime-Monitor-Azure-Functions-Python-GitHub-Actions
 
-az group create --name $RESOURCE_GROUP --location $LOCATION
-
-az storage account create \
-  --name $STORAGE_ACCOUNT \
-  --resource-group $RESOURCE_GROUP \
-  --location $LOCATION \
-  --sku Standard_LRS
-
-az functionapp create \
-  --resource-group $RESOURCE_GROUP \
-  --consumption-plan-location $LOCATION \
-  --runtime python \
-  --runtime-version 3.11 \
-  --functions-version 4 \
-  --name $FUNCTION_APP \
-  --storage-account $STORAGE_ACCOUNT \
-  --os-type Linux
-```
-
-### 2. Set application settings
-
-```bash
-az functionapp config appsettings set \
-  --name $FUNCTION_APP \
-  --resource-group $RESOURCE_GROUP \
-  --settings \
-    FUNCTIONS_WORKER_RUNTIME=python \
-    MONITORED_URLS='[{"name":"Example","url":"https://example.com"}]'
-```
-
-### 3. Deploy from your machine
-
-```bash
-func azure functionapp publish $FUNCTION_APP
-```
-
-### 4. Call the live endpoint
-
-```bash
-curl https://$FUNCTION_APP.azurewebsites.net/api/health-report
-```
-
-## Deploy with GitHub Actions
-
-The workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) deploys on push to `main` or when run manually.
-
-### Setup
-
-1. In Azure Portal, open your Function App → **Get publish profile** → download the file.
-2. In GitHub: **Settings** → **Secrets and variables** → **Actions**:
-   - **Secret:** `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` — paste the entire contents of the publish profile file.
-   - **Variable:** `AZURE_FUNCTIONAPP_NAME` — your Function App name (e.g. `func-uptime-monitor-001`).
-3. Push to `main` or run the workflow from the **Actions** tab.
-
-### Set `MONITORED_URLS` in Azure
-
-GitHub Actions deploys code only; configure URLs in Azure:
-
-```bash
-az functionapp config appsettings set \
-  --name $FUNCTION_APP \
-  --resource-group $RESOURCE_GROUP \
-  --settings MONITORED_URLS='[{"name":"Example","url":"https://example.com"}]'
-```
-
-Or use **Azure Portal** → Function App → **Environment variables**.
-
-## Troubleshooting
-
-### `health-report` returns empty results
-
-- Check that `MONITORED_URLS` is set and valid JSON in `local.settings.json` (local) or Azure App Settings (cloud).
-- Each entry needs both `"name"` and `"url"`.
-- Open **Logs** in the portal or run `func start` and watch the console for warnings.
-
-### `ModuleNotFoundError: No module named 'requests'`
-
-```bash
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-For Azure, ensure `requirements.txt` is at the project root (it is in this repo).
+### 2. Configure local settings
 
-### Timer does not seem to run locally
+```powershell
+copy local.settings.json.example local.settings.json
+```
 
-- Timer triggers need `AzureWebJobsStorage` configured (use `UseDevelopmentStorage=true` with [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite) or a real storage connection string).
-- Schedules use NCRONTAB: `0 0 * * * *` = top of every hour. Use `health-report` to trigger an on-demand check anytime.
+Edit `local.settings.json`:
 
-### Cold start / stale data
+- Set `MONITORED_URLS`
+- Optional: `UPTIME_TABLE_NAME`, `DISCORD_WEBHOOK_URL`
 
-- In-memory cache clears when Azure restarts your function instance.
-- First call to `health-report` after restart runs checks immediately if the cache is empty.
+### 3. Run Azurite (local storage)
 
-### Deployment fails in GitHub Actions
+Table Storage and the timer need storage locally:
 
-- Verify `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` secret is the full XML from the publish profile.
-- Verify `AZURE_FUNCTIONAPP_NAME` variable matches the app name exactly.
-- Confirm the Function App uses **Python 3.11** and **Functions v4**.
+```powershell
+npm install -g azurite
+azurite
+```
 
-### URL marked unhealthy but works in browser
+Keep Azurite running in a second terminal.
 
-- Some sites block non-browser user agents or require HTTPS redirects.
-- Check the `error` field in the JSON response for timeout or connection errors.
-- Default timeout is 10 seconds (see `REQUEST_TIMEOUT_SECONDS` in `function_app.py`).
+### 4. Start the Function App
+
+```powershell
+func start
+```
+
+### 5. Test locally
+
+```text
+http://127.0.0.1:7071/api/health-report
+http://127.0.0.1:7071/api/dashboard
+http://127.0.0.1:7071/api/history
+http://127.0.0.1:7071/api/history?app=Kairos&limit=10
+http://127.0.0.1:7071/api/history-view
+```
+
+## Azure deployment
+
+### Manual deploy
+
+```powershell
+az login
+func azure functionapp publish func-uptime-monitor-dan --python
+```
+
+### Set Azure app settings
+
+```powershell
+az functionapp config appsettings set `
+  --name func-uptime-monitor-dan `
+  --resource-group rg-uptime-monitor `
+  --settings `
+    MONITORED_URLS='[{"name":"Kairos","url":"https://kairos-six-inky.vercel.app/"}]' `
+    UPTIME_TABLE_NAME=UptimeChecks `
+    DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/your-webhook-id/your-token'
+```
+
+Or use **Azure Portal** -> Function App -> **Environment variables**.
+
+## GitHub Actions deployment
+
+Workflow: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+
+Required:
+
+- Secret: `AZURE_FUNCTIONAPP_PUBLISH_PROFILE`
+- Variable: `AZURE_FUNCTIONAPP_NAME`
+
+Flex Consumption settings in workflow:
+
+- `sku: flexconsumption`
+- `remote-build: true`
+
+Push to `main` to deploy. Configure `MONITORED_URLS`, `UPTIME_TABLE_NAME`, and `DISCORD_WEBHOOK_URL` in Azure after deploy.
+
+## Discord alerts
+
+1. In Discord: Server Settings -> Integrations -> Webhooks -> New Webhook
+2. Copy the webhook URL
+3. Set `DISCORD_WEBHOOK_URL` in Azure app settings (or `local.settings.json` locally)
+4. When a check returns unhealthy, one alert is sent per app per run
+
+If `DISCORD_WEBHOOK_URL` is empty, alerts are skipped silently.
+
+## Logging and troubleshooting
+
+The app uses Python `logging` for:
+
+- check start/finish
+- unhealthy checks
+- Table Storage save success/failure
+- Discord alert success/failure
+
+### View logs in Azure
+
+1. Azure Portal -> your Function App
+2. **Log stream** for live logs
+3. **Monitor -> Logs** for query/history
+
+### Common issues
+
+**Empty `/api/health-report`**
+
+- Check `MONITORED_URLS` is valid JSON with `name` and `url`
+
+**`/api/history` error locally**
+
+- Start **Azurite** before `func start`
+- Run `/api/health-report` first to create records
+
+**`/api/dashboard` missing history stats**
+
+- Storage may be unavailable; dashboard still shows latest results with a warning banner
+
+**Discord alerts not sending**
+
+- Confirm `DISCORD_WEBHOOK_URL` is set
+- Trigger an unhealthy check or wait for a real failure
+- Check Function App logs for Discord errors
+
+**Timer errors locally (`127.0.0.1:10000`)**
+
+- Run Azurite; timer needs storage locally
+
+**Cannot browse tables in Azure Portal**
+
+- Common on student accounts; use `/api/history` or `/api/history-view` instead
+
+## MVP limitations
+
+- In-memory latest cache resets on cold start (history remains in Table Storage)
+- History queries load records into memory before sorting (fine for small/medium history)
+- Discord alerts are basic webhook messages (no alert dedupe across separate runs)
+- No authentication on public HTTP endpoints
+- No Application Insights dashboards yet
+
+## Future improvements
+
+- Application Insights alerts and dashboards
+- Email/Slack alert channels
+- Authenticated admin endpoints
+- Per-app SLA reporting
+- Bicep or ARM templates for infrastructure (Terraform intentionally not included here)
 
 ## Interview talking points
 
-- **Serverless**: No VM to manage; Azure runs your code on a schedule and on HTTP requests.
-- **Separation of concerns**: `run_health_checks()` is shared by timer and HTTP triggers.
-- **Config via environment**: `MONITORED_URLS` keeps code generic; change sites without redeploying (in Azure App Settings).
-- **Trade-offs**: In-memory storage is simple but not durable—good MVP, then add Table Storage.
-- **CI/CD**: GitHub Actions + publish profile is a common, interview-friendly deployment story.
-
-## Next steps (not in MVP)
-
-- Persist results in **Azure Table Storage**
-- Add **Application Insights** for alerts and dashboards
-- Infrastructure as Code with **Terraform** or **Bicep**
-- Email/Slack notifications when `healthy` is `false`
+- **Timer + HTTP triggers** share the same `run_health_checks()` helper
+- **Dual storage**: memory for fast latest snapshot, Table Storage for durable history
+- **Graceful degradation**: dashboard works even if history stats fail
+- **Optional integrations**: Discord via env var, no code change needed to disable
+- **Observability**: structured logging viewable in Azure Log stream
 
 ## License
 
